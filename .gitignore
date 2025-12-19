@@ -2,3 +2,4 @@
 zig-out
 perf.data
 build.zig.zon
+jvbuild-out
