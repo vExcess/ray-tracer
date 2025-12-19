@@ -1,0 +1,63 @@
+{
+    name: "ray-tracer",
+    description: "Toy ray tracer in Zig",
+    author: "VExcess <github.com/vexcess>",
+    repository: "https://github.com/vExcess/ray-tracer",
+    
+    modules: {
+        main: {
+            root: "src/main.zig",
+            dependencies: [
+                "vexlib",
+                "zcanvas"
+            ]
+        },
+
+        fifthPort: {
+            root: "src/fifth-port.zig",
+            dependencies: [
+                "vexlib",
+                "zcanvas"
+            ]
+        },
+
+        zcanvas: {
+            type: "zig:lib",
+            root: "./lib/zcanvas/src/zcanvas.zig",
+            dependencies: [
+                "vexlib",
+                "libc",
+                "SDL2",
+                "cairo"
+            ]
+        },
+
+        vexlib: {
+            type: "zig:lib",
+            root: "./lib/vexlib/src/vexlib.zig"
+        },
+
+        SDL2: {
+            type: "system:lib",
+            install: {
+                debian_ubuntu: "sudo apt-get install libsdl2-dev",
+            }
+        },
+
+        cairo: {
+            type: "system:lib",
+            install: {
+                debian_ubuntu: "sudo apt-get install libcairo2-dev",
+            }
+        },
+
+        libc: {
+            type: "system:lib",
+            install: {
+                debian_ubuntu: "sudo apt install libc6-dev",
+            }
+        },
+    },
+
+    default: "main",
+}

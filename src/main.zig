@@ -1,56 +1,37 @@
 const std = @import("std");
 
-const vexlib = @import("lib/vexlib.zig");
+const zcanvas = @import("zcanvas");
+const Canvas = zcanvas.Canvas;
+const color = zcanvas.color;
+
+const Window = zcanvas.Window;
+const Key = Window.Key;
+const WindowEvent = Window.Event;
+
+const vexlib = @import("vexlib");
 const Math = vexlib.Math;
-const ObjectArray = vexlib.ObjectArray;
+const Array = vexlib.ArrayList;
 const Uint8Array = vexlib.Uint8Array;
 const Uint32Array = vexlib.Uint32Array;
 const print = vexlib.print;
 const println = vexlib.println;
 
-const sdl = @cImport({
-    @cInclude("lib/sdllib.h");
-});
+var running = true;
 
-// SDL constants
-const SDL_WINDOWPOS_CENTERED = 805240832;
-const SDL_WINDOW_SHOWN = 4;
-const SDL_WINDOW_BORDERLESS = 16;
-const SDL_QUIT = 256;
-const SDL_KEYDOWN = 768;
-
-var sdlRunning: bool = true;
-
-export fn handleSDLEvent(eventType: i32, eventData: i32) void {
-    const KEY_ESCAPE = 27;
-
-    switch (eventType) {
-        SDL_QUIT => {
-            sdlRunning = false;
+pub fn eventHandler(event: WindowEvent) void {
+    switch (event.which) {
+        .Quit => {
+            running = false;
         },
-        SDL_KEYDOWN => {
-            if (eventData == KEY_ESCAPE) {
-                sdlRunning = false;
+        .KeyDown => {
+            if (event.data == Key.Escape) {
+                running = false;
             }
         },
-        else => {}
+        .Unknown => {
+
+        }
     }
-}
-
-fn rgbaToU32(r: u8, g: u8, b: u8, a: u8) u32 {
-    return (@as(u32, @intCast(a)) << 24) | 
-           (@as(u32, @intCast(r)) << 16) | 
-           (@as(u32, @intCast(g)) <<  8) | 
-           (@as(u32, @intCast(b))      );
-}
-
-fn u32ToRgba(val: u32) [4]u8 {
-    return [4]u8{
-        @as(u8, @intCast((val >> 16) & 255)),
-        @as(u8, @intCast((val >>  8) & 255)),
-        @as(u8, @intCast((val      ) & 255)),
-        @as(u8, @intCast((val >> 24) & 255)),
-    };
 }
 
 const Tracer = @import("./tracer.zig");
@@ -62,18 +43,18 @@ const Frame = struct {
     height: u32,
     f32Width: f32,
     f32Height: f32,
-    scene: *ObjectArray(Tracer.Object),
-    lights: ObjectArray(*Tracer.Object),
+    scene: *Array(Tracer.Object),
+    lights: Array(*Tracer.Object),
     currI: u32,
     done: bool,
 
-    fn new(width: u32, height: u32, scene: *ObjectArray(Tracer.Object)) Frame {
-        var pixels = Uint8Array.new(width * height * 4);
+    fn alloc(width: u32, height: u32, scene: *Array(Tracer.Object)) Frame {
+        var pixels = Uint8Array.alloc(width * height * 4);
         pixels.fill(0, -1);
-        pixels.len = pixels.capacity;
+        pixels.len = pixels.capacity();
 
         const pixelCount = width * height;
-        var randomMappings = Uint32Array.new(pixelCount);
+        var randomMappings = Uint32Array.alloc(pixelCount);
         {var i: u32 = 0; while (i < pixelCount) : (i += 1) {
             randomMappings.append(i);
         }}
@@ -85,9 +66,9 @@ const Frame = struct {
             randomMappings.set(j, temp);
         }}
 
-        var lights = ObjectArray(*Tracer.Object).new(1);
+        var lights = Array(*Tracer.Object).alloc(1);
         {var i: u32 = 0; while (i < scene.len) : (i += 1) {
-            const light = scene.get(i);
+            const light = scene.getPtr(i);
             const isEmmisive = switch (light.*) { inline else => |o| o.emissive };
             if (isEmmisive) {
                 lights.append(light);
@@ -140,7 +121,7 @@ const Frame = struct {
             .clr = .{0, 0, 0}
         };
 
-        const trace = Tracer.rayTrace(self.scene, &self.lights, &myRay, 0);
+        const trace = Tracer.rayTrace(self.scene, self.lights, &myRay, 0);
         var clr = trace.shapeClr * trace.availLight;
         clr[0] = Math.constrain(clr[0] * 255, 0, 255);
         clr[1] = Math.constrain(clr[1] * 255, 0, 255);
@@ -164,10 +145,10 @@ const Frame = struct {
         }
     }
 
-    fn free(self: *Frame) void {
-        self.pixels.free();
-        self.pixelMappings.free();
-        self.lights.free();
+    fn dealloc(self: *Frame) void {
+        self.pixels.dealloc();
+        self.pixelMappings.dealloc();
+        self.lights.dealloc();
     }
 
     fn update(self: *Frame, amt: u32) void {
@@ -178,7 +159,7 @@ const Frame = struct {
         self.done = self.currI == self.pixels.len / 4 - 1;
     }
 
-    fn display(frame_: Frame, buff: anytype, width: u32) void {
+    fn display(frame_: Frame, buff: []u8, width: u32) void {
         var frame = frame_;
         var i: u32 = 0; while (i < frame.pixels.len) : (i += 4) {
             const x = (i >> 2) % frame.width;
@@ -186,13 +167,11 @@ const Frame = struct {
             const scale = width / frame.width;
             {var xOff: u32 = 0; while (xOff < scale) : (xOff += 1) {
                 {var yOff: u32 = 0; while (yOff < scale) : (yOff += 1) {
-                    const mappedIdx = @as(usize, @intCast((x * scale + xOff) + (y * scale + yOff) * width));
-                    buff.*[mappedIdx] = rgbaToU32(
-                        frame.pixels.get(i),
-                        frame.pixels.get(i+1),
-                        frame.pixels.get(i+2),
-                        255.0
-                    );
+                    const mappedIdx = @as(usize, @intCast((x * scale + xOff) + (y * scale + yOff) * width)) << 2;
+                    buff[mappedIdx] = frame.pixels.get(i);
+                    buff[mappedIdx+1] = frame.pixels.get(i+1);
+                    buff[mappedIdx+2] = frame.pixels.get(i+2);
+                    buff[mappedIdx+3] = 255;
                 }}
             }}
         }
@@ -202,29 +181,36 @@ const Frame = struct {
 pub fn main() !void {
     // setup allocator
     var generalPurposeAllocator = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = generalPurposeAllocator.deinit();
     const allocator = generalPurposeAllocator.allocator();
     vexlib.init(&allocator);
-    
+
+    // init SDL
+    try Window.initSDL(Window.INIT_EVERYTHING);
+
+    // create a window
+    var myWin = try Window.SDLWindow.alloc(.{
+        .title = "Raytracer",
+        .width = 400,
+        .height = 400,
+        .flags = Window.WINDOW_SHOWN | Window.WINDOW_ALLOW_HIGHDPI
+    });
+    myWin.eventHandler = eventHandler; // attach event handler
+
+    // print dimensions
     println("Game running");
 
-    // render SDL window
-    sdlRunning = sdl.createWindow(
-        "demo", 
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
-        400, 400, 
-        SDL_WINDOW_SHOWN
-    ) > 0;
+    // create canvas & rendering context
+    var canvas = Canvas.alloc(allocator, myWin.width, myWin.height, 1.5, zcanvas.RendererType.Software);
+    defer canvas.dealloc();
+    const ctx = try canvas.getContext("2d", .{});
 
-    const MASK_16 = (1 << 16) - 1;
-    // const screenWidth: u32 = sdl.getScreenRes() >> 16;
-    // const screenHeight: u32 = sdl.getScreenRes() & MASK_16;
-    const pixels = sdl.getPixels();
-    const windowWidth: u32 = sdl.getWindowRes() >> 16;
-    const windowHeight: u32 = sdl.getWindowRes() & MASK_16;
 
-    var scene = ObjectArray(Tracer.Object).new(0);
-    defer scene.free();
+    // attach canvas to window
+    myWin.setCanvas(&canvas);
+
+    // setup scene
+    var scene = Array(Tracer.Object).alloc(0);
+    defer scene.dealloc();
     // light
     var light = Tracer.sphere(
         -3, 3, 9,
@@ -304,16 +290,20 @@ pub fn main() !void {
         .{1.0, 1.0, 1.0}, 1.0
     ));
 
-    var frame1 = Frame.new(windowWidth, windowHeight, &scene);
-    defer frame1.free();
-    
-    var frameCount: f32 = 0;
-    while (sdlRunning) {
-        sdl.pollInput();
 
+    // initial frame
+    var frame1 = Frame.alloc(myWin.width, myWin.height, &scene);
+    defer frame1.dealloc();
+
+    var frameCount: f32 = 0;
+    while (running) {
+        // check for events
+        myWin.pollInput();
+
+        // run raytrace
         if (!frame1.done) {
             frame1.update(100);
-            Frame.display(frame1, &pixels, windowWidth);
+            Frame.display(frame1, ctx._softItems.imgData.data.buffer, myWin.width);
 
             // print(frame1.currI * 100 / frame1.pixelMappings.len);
             // println("%");
@@ -323,10 +313,16 @@ pub fn main() !void {
             }
         }
 
-        sdl.updateWindow();
-        sdl.wait(1);
+        // render frame
+        try myWin.render();
+
+        // wait for 16ms
+        Window.wait(16);
+
         frameCount += 1.0;
     }
 
-    sdl.destroyWindow();
+    // clean up
+    myWin.dealloc();
+    
 }

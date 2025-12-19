@@ -1,6 +1,6 @@
-const vexlib = @import("./lib/vexlib.zig");
+const vexlib = @import("vexlib");
 const Math = vexlib.Math;
-const ObjectArray = vexlib.ObjectArray;
+const Array = vexlib.ArrayList;
 
 // const Vector = @import("./lib/vec.zig");
 const Vec3 = @Vector(3, f32);
@@ -158,16 +158,15 @@ fn getNormalVector(intersection: *const Vec3, ray: *Ray, obj: *const Object) Vec
 }
 
 fn sphereSDF(ray: *Ray, mySphere: *const Sphere) ?f32 {
-    const lx = ray.pos[0] - mySphere.x;
-    const ly = ray.pos[1] - mySphere.y;
-    const lz = ray.pos[2] - mySphere.z;
-
-    const a = ray.dir[0] * ray.dir[0] + ray.dir[1] * ray.dir[1] + ray.dir[2] * ray.dir[2];
-    const b = 2.0 * (ray.dir[0] * lx + ray.dir[1] * ly + ray.dir[2] * lz);
-    const c = lx * lx + ly * ly + lz * lz - (mySphere.d * mySphere.d);
-
+    const l = vec3(
+        ray.pos[0] - mySphere.x,
+        ray.pos[1] - mySphere.y,
+        ray.pos[2] - mySphere.z
+    );
+    const a = Math.dot(ray.dir, ray.dir);
+    const b = 2.0 * Math.dot(ray.dir, l);
+    const c = Math.dot(l, l) - (mySphere.d * mySphere.d);
     const discr = b * b - 4.0 * a * c;
-
     if (discr < 0.0 or b > 0.0) {
         return null;
     } else {
@@ -187,24 +186,22 @@ fn boxSDF(ray: *Ray, myBox: *const Box) ?f32 {
     const bx_max_y = myBox.y + halfH;
     const bx_max_z = myBox.z + halfL;
     
-    const rayNormX = 1.0 / ray.dir[0];
-    const rayNormY = 1.0 / ray.dir[1];
-    const rayNormZ = 1.0 / ray.dir[2];
-    
-    const tx1 = (bx_min_x - ray.pos[0]) * rayNormX;
-    const tx2 = (bx_max_x - ray.pos[0]) * rayNormX;
+    const rayNorm = v3Splat(1.0) / ray.dir;
+
+    const tx1 = (bx_min_x - ray.pos[0]) * rayNorm[0];
+    const tx2 = (bx_max_x - ray.pos[0]) * rayNorm[0];
     
     var tmin = Math.min(tx1, tx2);
     var tmax = Math.max(tx1, tx2);
     
-    const ty1 = (bx_min_y - ray.pos[1]) * rayNormY;
-    const ty2 = (bx_max_y - ray.pos[1]) * rayNormY;
+    const ty1 = (bx_min_y - ray.pos[1]) * rayNorm[1];
+    const ty2 = (bx_max_y - ray.pos[1]) * rayNorm[1];
     
     tmin = Math.max(tmin, Math.min(ty1, ty2));
     tmax = Math.min(tmax, Math.max(ty1, ty2));
     
-    const tz1 = (bx_min_z - ray.pos[2]) * rayNormZ;
-    const tz2 = (bx_max_z - ray.pos[2]) * rayNormZ;
+    const tz1 = (bx_min_z - ray.pos[2]) * rayNorm[2];
+    const tz2 = (bx_max_z - ray.pos[2]) * rayNorm[2];
     
     tmin = Math.max(tmin, Math.min(tz1, tz2));
     tmax = Math.min(tmax, Math.max(tz1, tz2));
@@ -218,7 +215,7 @@ fn boxSDF(ray: *Ray, myBox: *const Box) ?f32 {
 }
 
 fn triangleSDF(ray: *Ray, myTriangle: *const Triangle) ?f32 {
-    const rayVector = vec3(ray.dir[0], ray.dir[1], ray.dir[2]);
+    const rayVector = ray.dir;
     const vertex1 = myTriangle.v1;
     const edge1 = myTriangle.v2 - vertex1;
     const edge2 = myTriangle.v3 - vertex1;
@@ -375,14 +372,14 @@ fn cosDiffuseRay(ray: *Ray, normalVector: Vec3, diffuseAmt: f32) void {
     }
 }
 
-pub fn rayTrace(scene_: *ObjectArray(Object), lights: *ObjectArray(*Object), ray: *Ray, bounces: u32) struct{ closestObject: ?*Object, shapeClr: Vec3, availLight: Vec3 } {
+pub fn rayTrace(scene_: *Array(Object), lights: Array(*Object), ray: *Ray, bounces: u32) struct{ closestObject: ?*Object, shapeClr: Vec3, availLight: Vec3 } {
     var scene = scene_;
 
     // find the closest object the ray hits
     var closestHitDist = Math.Infinity(f32);
     var closestObject: ?*Object = null;
     {var i = @as(i32, @intCast(scene.len)) - 1; while (i >= 0) : (i -= 1) {
-        const object = scene.get(@as(u32, @intCast(i)));
+        const object = scene.getPtr(@as(u32, @intCast(i)));
         var signedDist: ?f32 = null;
 
         switch (object.*) {
@@ -440,7 +437,7 @@ pub fn rayTrace(scene_: *ObjectArray(Object), lights: *ObjectArray(*Object), ray
                 // calc lighting
                 var numLights: f32 = 0;
                 {var i: u32 = 0; while (i < lights.len) : (i += 1) {
-                    const light = lights.get(i).*;
+                    const light = lights.get(i);
                     switch (light.*) {
                         .triangle => {
 
@@ -454,7 +451,7 @@ pub fn rayTrace(scene_: *ObjectArray(Object), lights: *ObjectArray(*Object), ray
                             ));
 
                             // do shadows
-                            if (bounces < 2) {
+                            if (bounces < 1) {
                                 var shadowRay = ray.createShadowRay(&lightVector);
                                 const shadowTrace = rayTrace(scene, lights, &shadowRay, bounces + 1);
                                 const shadowClosestObject = shadowTrace.closestObject;
@@ -473,7 +470,7 @@ pub fn rayTrace(scene_: *ObjectArray(Object), lights: *ObjectArray(*Object), ray
                 // do reflections
                 // roughness of 0.0 is mirror, roughness of 1.0 is flat
                 const roughness = switch (closestObj.*) { inline else => |o| o.roughness };
-                if (bounces < 2) {
+                if (bounces < 1) {
                     var allocator = vexlib.allocatorPtr.*;
                     const numSamples = 1 + roughness * 25;
                     const sampleRays = allocator.alloc(Ray, @as(u32, @intFromFloat(numSamples))) catch unreachable;
