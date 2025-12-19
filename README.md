@@ -2,9 +2,14 @@
 Just a toy ray tracer written in Zig
 
 # Info
-Run `make` to build the project in debug mode, `make release` to build the project in release mode, and `make run` to run the built project.  
-Make sure you SDL installed on your system.  
-If you don't want to compile it yourself I have provided the compiled executable for x86_64 linux in zigout/bin.  
-There are still a lot of optimizations I need to do so it's pretty slow right now.
+This project uses [jvbuild](https://github.com/vExcess/jvbuild).
+
+Install dependencies: `jvbuild install`  
+Run in debug mode: `jvbuild run`  
+Run with optimizations: `jvbuild run -O=fast`  
+
+Replace `run` with `build` to compile the project without running it. 
+
+My raytracer is really slow right now. I need to figure out what optimizations I can do.
 
 ![screenshot](https://raw.githubusercontent.com/vExcess/ray-tracer/main/demo-output.png?raw=true)
