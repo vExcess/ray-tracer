@@ -1,14 +1,21 @@
 const vexlib = @import("vexlib");
 const Math = vexlib.Math;
-const Array = vexlib.ArrayList;
+const ArrayList = vexlib.ArrayList;
+const As = vexlib.As;
+
+const libscene = @import("./scene.zig");
+const Scene = libscene.Scene;
+const Sphere = libscene.Sphere;
+const Box = libscene.Box;
+const Triangle = libscene.Triangle;
+const Plane = libscene.Plane;
+const Object = libscene.Object;
 
 // const Vector = @import("./lib/vec.zig");
 const Vec3 = @Vector(3, f32);
-
 fn v3Splat(val: anytype) Vec3 {
     return @as(Vec3, @splat(val));
 }
-
 fn vec3(x: f32, y: f32, z: f32) Vec3 {
     return .{x, y, z};
 }
@@ -18,63 +25,6 @@ fn color(x: f32, y: f32, z: f32) Vec3 {
 }
 
 const EPSILON = 0.000003;
-
-// const Shapes = enum {
-//     triangle,
-//     plane,
-//     box,
-//     sphere,
-//     torus,
-//     triangleMesh
-// };
-
-pub const Sphere = struct {
-    clr: Vec3,
-    emissive: bool,
-    roughness: f32,
-    x: f32,
-    y: f32,
-    z: f32,
-    d: f32
-};
-
-pub const Box = struct {
-    clr: Vec3,
-    emissive: bool,
-    roughness: f32,
-    x: f32,
-    y: f32,
-    z: f32,
-    w: f32,
-    h: f32,
-    l: f32
-};
-
-pub const Triangle = struct {
-    clr: Vec3,
-    emissive: bool,
-    roughness: f32,
-    v1: Vec3,
-    v2: Vec3,
-    v3: Vec3,
-};
-
-pub const Plane = struct {
-    clr: Vec3,
-    emissive: bool,
-    roughness: f32,
-    x: f32,
-    y: f32,
-    z: f32,
-    normal: Vec3,
-};
-
-pub const Object = union(enum) {
-    sphere: Sphere,
-    box: Box,
-    triangle: Triangle,
-    plane: Plane
-};
 
 pub const Ray = struct {
     // the ray's x, y, z positions
@@ -282,79 +232,48 @@ fn planeSDF(ray: *Ray, myPlane: *const Plane) ?f32 {
     return boxSDF(ray, &planeBox);
 }
 
-pub fn sphere(x: f32, y: f32, z: f32, diameter: f32, clr: Vec3, roughness: f32) Object {
-    return Object{
-        .sphere = Sphere{
-            .clr = clr,
-            .emissive = false,
-            .roughness = roughness,
-            .x = x,
-            .y = y,
-            .z = z,
-            .d = diameter
-        }
-    };
+fn reflectRay(dir: Vec3, normalVector: Vec3) Vec3 {
+    return dir - normalVector * v3Splat(Math.dot(dir, normalVector)) * v3Splat(2.0);
 }
 
-pub fn box(x: f32, y: f32, z: f32, w: f32, h: f32, l: f32, clr: Vec3, roughness: f32) Object {
-    return Object{
-        .box = Box{
-            .clr = clr,
-            .emissive = false,
-            .roughness = roughness,
-            .x = x,
-            .y = y,
-            .z = z,
-            .w = w,
-            .h = h,
-            .l = l,
-        }
-    };
-}
-
-pub fn triangle(x1: f32, y1: f32, z1: f32, x2: f32, y2: f32, z2: f32, x3: f32, y3: f32, z3: f32, clr: Vec3, roughness: f32) Object {
-    return Object{
-        .triangle = Triangle{
-            .clr = clr,
-            .emissive = false,
-            .roughness = roughness,
-            .v1 = vec3(x1, y1, z1),
-            .v2 = vec3(x2, y2, z2),
-            .v3 = vec3(x3, y3, z3),
-        }
-    };
-}
-
-pub fn plane(x: f32, y: f32, z: f32, normalX: f32, normalY: f32, normalZ: f32, clr: Vec3, roughness: f32) Object {
-    return Object{
-        .plane = Plane{
-            .clr = clr,
-            .emissive = false,
-            .roughness = roughness,
-            .x = x,
-            .y = y,
-            .z = z,
-            .normal = vec3(normalX, normalY, normalZ)
-        }
-    };
-}
-
-fn diffuseRay(normalVector: Vec3) Vec3 {
+fn uniformDiffuseRay(normalVector: Vec3) Vec3 {
     var ptOnSphere: Vec3 = .{
         Math.randomGaussian(f32),
         Math.randomGaussian(f32),
         Math.randomGaussian(f32)
     };
-    ptOnSphere = Math.normalize(ptOnSphere);
-    const dot = Math.dot(ptOnSphere, normalVector);
-    if (dot < 0) {
-        return -ptOnSphere;
+    const optimized = true;
+    if (optimized) {
+        ptOnSphere = Math.normalize(ptOnSphere);
+        const dot = Math.dot(ptOnSphere, normalVector);
+        if (dot < 0) {
+            return -ptOnSphere;
+        }
+        return ptOnSphere;
+    } else {
+        while (Math.mag(ptOnSphere) > 1) {
+            ptOnSphere = .{
+                Math.randomGaussian(f32),
+                Math.randomGaussian(f32),
+                Math.randomGaussian(f32)
+            };
+        }
+        return Math.normalize(ptOnSphere) * v3Splat(Math.sign(Math.dot(ptOnSphere, normalVector)));
     }
-    return ptOnSphere;
 }
 
-fn reflectRay(dir: Vec3, normalVector: Vec3) Vec3 {
-    return dir - normalVector * v3Splat(Math.dot(dir, normalVector)) * v3Splat(2.0);
+fn lambertDiffuseRay(normalVector: Vec3, diffuseAmt: f32) Vec3 {
+    const randomVec: Vec3 = .{
+        Math.randomGaussian(f32),
+        Math.randomGaussian(f32),
+        Math.randomGaussian(f32)
+    };
+    var diffuseDir = Math.normalize(normalVector * v3Splat(diffuseAmt) + randomVec);
+    diffuseDir += normalVector;
+    if (diffuseDir[0] == 0 and diffuseDir[1] == 0 and diffuseDir[2] == 0) {
+        return normalVector;
+    }
+    return Math.normalize(diffuseDir);
 }
 
 fn cosDiffuseRay(ray: *Ray, normalVector: Vec3, diffuseAmt: f32) void {
@@ -372,14 +291,12 @@ fn cosDiffuseRay(ray: *Ray, normalVector: Vec3, diffuseAmt: f32) void {
     }
 }
 
-pub fn rayTrace(scene_: *Array(Object), lights: Array(*Object), ray: *Ray, bounces: u32) struct{ closestObject: ?*Object, shapeClr: Vec3, availLight: Vec3 } {
-    var scene = scene_;
-
+pub fn rayTrace(scene: *const Scene, ray: *Ray, bounces: u32, rayStack: *ArrayList(Ray)) struct{ closestObject: ?*Object, shapeClr: Vec3, availLight: Vec3 } {
     // find the closest object the ray hits
     var closestHitDist = Math.Infinity(f32);
     var closestObject: ?*Object = null;
-    {var i = @as(i32, @intCast(scene.len)) - 1; while (i >= 0) : (i -= 1) {
-        const object = scene.getPtr(@as(u32, @intCast(i)));
+    {var i = @as(i32, @intCast(scene.objects.len)) - 1; while (i >= 0) : (i -= 1) {
+        const object = scene.objects.getPtr(@as(u32, @intCast(i)));
         var signedDist: ?f32 = null;
 
         switch (object.*) {
@@ -423,7 +340,7 @@ pub fn rayTrace(scene_: *Array(Object), lights: Array(*Object), ray: *Ray, bounc
             // calculate color for shapes
             const isEmissive = switch (closestObj.*) { inline else => |o| o.emissive };
             if (isEmissive) {
-                shapeClr = shapeClr;
+                shapeClr = Math.normalize(shapeClr);
                 availLight = shapeClr;
             } else {
                 // do checkered pattern
@@ -434,50 +351,56 @@ pub fn rayTrace(scene_: *Array(Object), lights: Array(*Object), ray: *Ray, bounc
                     shapeClr[2] = temp;
                 }
 
+                // roughness of 0.0 is mirror, roughness of 1.0 is flat
+                const roughness = switch (closestObj.*) { inline else => |o| o.roughness };
+                const numSamples = As.u32(1.0 + roughness * 50 * (1/(As.f32(bounces)+1)));
+                const splatNumSamples = v3Splat(As.f32(numSamples));
+                var subRayStack = rayStack.slice(numSamples, -1);
+
                 // calc lighting
-                var numLights: f32 = 0;
-                {var i: u32 = 0; while (i < lights.len) : (i += 1) {
-                    const light = lights.get(i);
+                {var i: u32 = 0; while (i < scene.lights.len) : (i += 1) {
+                    const light = scene.lights.get(i);
                     switch (light.*) {
                         .triangle => {
 
                         },
                         inline else => |notTriangle| {
-                            numLights += 1;
-                            const lightVector = Math.normalize(vec3(
-                                notTriangle.x - intersection[0], 
-                                notTriangle.y - intersection[1],
-                                notTriangle.z - intersection[2]
-                            ));
+                            if (bounces < 2) {
+                                // do shadows
+                                const lightVector = Math.normalize(vec3(
+                                    notTriangle.x - intersection[0], 
+                                    notTriangle.y - intersection[1],
+                                    notTriangle.z - intersection[2]
+                                ));
 
-                            // do shadows
-                            if (bounces < 1) {
-                                var shadowRay = ray.createShadowRay(&lightVector);
-                                const shadowTrace = rayTrace(scene, lights, &shadowRay, bounces + 1);
-                                const shadowClosestObject = shadowTrace.closestObject;
+                                // initialize sample rays
+                                {var j: u32 = 0; while (j < numSamples) : (j += 1) {
+                                    const newDir = lambertDiffuseRay(lightVector, 100 - roughness*100.0);
+                                    rayStack.set(j, ray.createShadowRay(&newDir));
+                                }}
 
-                                const lightStrength = Math.dot(lightVector, normalVector);
-                                const lightClr = switch (light.*) { inline else => |o| o.clr };
-                                if (shadowClosestObject == null or @intFromPtr(shadowClosestObject.?) == @intFromPtr(light)) {
-                                    // there is not a shadow
-                                    availLight += lightClr * v3Splat(lightStrength);
-                                }
+                                // trace samples
+                                {var j: u32 = 0; while (j < numSamples) : (j += 1) {
+                                    const shadowRay = rayStack.getPtr(j);
+                                    const shadowTrace = rayTrace(scene, shadowRay, bounces + 1, &subRayStack);
+                                    const shadowClosestObject = shadowTrace.closestObject;
+
+                                    const lightStrength = Math.dot(lightVector, normalVector);
+                                    const lightClr = switch (light.*) { inline else => |o| o.clr };
+                                    if (shadowClosestObject == null or @intFromPtr(shadowClosestObject.?) == @intFromPtr(light)) {
+                                        // there is not a shadow
+                                        availLight += lightClr * v3Splat(lightStrength) / splatNumSamples;
+                                    }
+                                }}
                             }
                         }
                     }
                 }}
 
                 // do reflections
-                // roughness of 0.0 is mirror, roughness of 1.0 is flat
-                const roughness = switch (closestObj.*) { inline else => |o| o.roughness };
-                if (bounces < 1) {
-                    var allocator = vexlib.allocatorPtr.*;
-                    const numSamples = 1 + roughness * 25;
-                    const sampleRays = allocator.alloc(Ray, @as(u32, @intFromFloat(numSamples))) catch unreachable;
-                    defer allocator.free(sampleRays);
-
+                if (bounces < 2) {
                     // initialize sample rays
-                    {var i: u32 = 0; while (i < sampleRays.len) : (i += 1) {
+                    {var i: u32 = 0; while (i < numSamples) : (i += 1) {
                         var sampleRay = Ray{
                             .pos = ray.pos,
                             .dir = undefined,
@@ -487,22 +410,18 @@ pub fn rayTrace(scene_: *Array(Object), lights: Array(*Object), ray: *Ray, bounc
                         };
                         if (roughness == 0.0) {
                             sampleRay.dir = reflectRay(ray.dir, normalVector);
-                        } else if (roughness == 1.0) {
-                            sampleRay.dir = diffuseRay(normalVector);
                         } else {
-                            const diffuseDir = diffuseRay(normalVector);
-                            const specularDir = reflectRay(ray.dir, normalVector);
-                            sampleRay.dir = Math.lerp(specularDir, diffuseDir, roughness);
+                            sampleRay.dir = lambertDiffuseRay(normalVector, 100 - roughness*100.0);
                         }
-                        sampleRays[i] = sampleRay;
+                        rayStack.set(i, sampleRay);
                     }}
 
                     // trace samples
-                    {var i: u32 = 0; while (i < sampleRays.len) : (i += 1) {
-                        const sampleRay = &sampleRays[i];
-                        const mirrorTrace = rayTrace(scene, lights, sampleRay, bounces + 1);
+                    {var i: u32 = 0; while (i < numSamples) : (i += 1) {
+                        const sampleRay = rayStack.getPtr(i);
+                        const mirrorTrace = rayTrace(scene, sampleRay, bounces + 1, &subRayStack);
                         const traceClr = (mirrorTrace.shapeClr * mirrorTrace.availLight);
-                        availLight += traceClr / v3Splat(numSamples);
+                        availLight += traceClr / splatNumSamples;
                     }}
                     availLight /= v3Splat(2);
                 }
